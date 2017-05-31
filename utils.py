@@ -4,12 +4,13 @@ Utility functions for multi-armed bandits
 import numpy as np
 
 
-def regret(true_params, outcomes):
+def regret(bandit, path):
     """ calculate regret = reward under optimal policy
-    minus the actual policy taken """
-    optimal = max(true_params) * outcomes.sum()
-    successes = outcomes[:, 1].sum()
-    return (optimal - successes) / outcomes.sum()
+    minus expected value of the actual policy taken
+    only for bandits whose parameters == expected value of reward"""
+    optimal = max(bandit.get_parameters())
+    expected = bandit.get_parameters()[path]
+    return np.mean(optimal - expected)
 
 
 def softmax(x):
