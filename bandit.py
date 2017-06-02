@@ -29,6 +29,10 @@ class Bandit(object):
         " play specified arm of this bandit "
         pass
 
+    def get_mean(self):
+        " translate bandit features into expected rewards "
+        pass
+
 
 class LinearBandit(Bandit):
     " K-armed bandit with Gaussian payoffs "
@@ -79,8 +83,8 @@ class DisjointLinearBandit(Bandit):
         # parameters are N(loc, scale) using specified parameters
         # default: standard normal
         theta = np.random.normal(loc=loc,
-                                scale=scale,
-                                size=self.K * d).\
+                                 scale=scale,
+                                 size=self.K * d).\
                reshape((self.K, d))
         self.parameters = theta
 
@@ -98,9 +102,8 @@ class DisjointLinearBandit(Bandit):
         return self.features[k, :]
 
     def get_mean(self):
-        " translate bandit features into expected rewards "
         mu = np.zeros(self.get_K())
-        for k in range(len(mu)):
+        for k, _ in enumerate(mu):
             x = self.get_features(k)  # d-vector
             theta = self.parameters[k, :]  # d-vector
             mu[k] = np.dot(x.T, theta)  # scalar

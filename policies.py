@@ -20,10 +20,6 @@ def random_policy(bandit, n_plays):
         outcomes[k, reward] += 1
         path[t] = k
         rewards[t] = reward
-    # TODO: write tests to check this
-    assert int(outcomes.sum()) == n_plays
-    assert sum([np.isnan(x) for x in path]) == 0
-    assert sum([np.isnan(x) for x in rewards]) == 0
     return (outcomes, path, rewards)
 
 
@@ -112,7 +108,7 @@ def thompson_policy(bandit, n_plays):
 
 
 def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_penalty=1.0):
-    """ source: 
+    """ source:
     Algorithm 1 of https://arxiv.org/pdf/1003.0146.pdf
     """
     K = bandit.get_K()
@@ -137,7 +133,8 @@ def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_pen
                 theta[k] = np.linalg.solve(A[k], b[k])
                 p[k] = np.dot(theta[k].T, x) + \
                         alpha * np.sqrt(np.dot(np.dot(x.T,
-                            np.linalg.inv(A[k])), x))
+                                                      np.linalg.inv(A[k])),
+                                               x))
             k = np.argmax(p)
         reward = bandit.pull_arm(k)
         # update our parameters
