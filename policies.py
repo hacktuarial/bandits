@@ -109,3 +109,42 @@ def thompson_policy(bandit, n_plays):
         path[t] = k
         rewards[t] = reward
     return (outcomes, path, rewards)
+
+
+def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_penalty=1.0):
+    """ source: 
+    Algorithm 1 of https://arxiv.org/pdf/1003.0146.pdf
+    """
+    K = bandit.get_K()
+    # keep track of decisions made and rewards
+    path = [np.nan] * n_plays
+    rewards = [np.nan] * n_plays
+    # parameters for the policy
+    d = len(bandit.get_features(0))
+    A = [np.eye(d) * l2_penalty] * K
+    b = [np.zeros(d)] * K
+    theta = [np.nan] * K
+    p = [np.nan] * K
+
+    for t in range(n_plays):
+        features = bandit.get_features(range(K))
+        # play every arm once
+        if t < K and play_all_first:
+            k = t
+        else:
+            for k in range(K):
+                x = features[k, :]
+                theta[k] = np.linalg.solve(A[k], b[k])
+                p[k] = np.dot(theta[k].T, x) + \
+                        alpha * np.sqrt(np.dot(np.dot(x.T,
+                            np.linalg.inv(A[k])), x))
+            k = np.argmax(p)
+        reward = bandit.pull_arm(k)
+        # update our parameters
+        A[k] += np.dot(features[k, :], features[k, :].T)
+        b[k] += reward * features[k, :]
+        # book keeping
+        path[t] = k
+        rewards[t] = reward
+
+    return (path, rewards)

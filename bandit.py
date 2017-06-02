@@ -2,6 +2,7 @@
 Multi-armed bandits
 """
 import numpy as np
+from scipy.special import expit
 
 
 class Bandit(object):
@@ -45,6 +46,9 @@ class LinearBandit(Bandit):
                                 scale=self.noise,
                                 size=1)[0]
 
+    def get_mean(self):
+        raise NotImplementedError
+
 
 class BinaryBandit(Bandit):
     """ bernoulli bandit with K arms.
@@ -59,3 +63,45 @@ class BinaryBandit(Bandit):
         return np.random.binomial(n=1,
                                   p=self.parameters[k],
                                   size=1)[0]
+    def get_mean(self):
+        return self.get_parameters()
+
+
+class DisjointLinearBandit(Bandit):
+    " K-armed contextual bandit with binary payoffs "
+    def initialize(self, **kwargs):
+        d = kwargs.get("d")  # dimension of feature vectors
+        loc = kwargs.get("loc", 0)
+        scale = kwargs.get("scale", 1)
+        # each arm has its own feature vector of length d
+        self.features = np.random.normal(size=self.K * d).\
+                reshape((self.K, d))
+        # parameters are N(loc, scale) using specified parameters
+        # default: standard normal
+        theta = np.random.normal(loc=loc,
+                                scale=scale,
+                                size=self.K * d).\
+               reshape((self.K, d))
+        self.parameters = theta
+
+
+    def pull_arm(self, k):
+        x = self.get_features(k)  # d-vector
+        theta = self.parameters[k, :]  # d-vector
+        mu = expit(np.dot(x.T, theta))  # scalar
+        return np.random.binomial(n=1,
+                                  p=mu,
+                                  size=1)[0]
+
+    def get_features(self, k):
+        " get features for the specified arm "
+        return self.features[k, :]
+
+    def get_mean(self):
+        " translate bandit features into expected rewards "
+        mu = np.zeros(self.get_K())
+        for k in range(len(mu)):
+            x = self.get_features(k)  # d-vector
+            theta = self.parameters[k, :]  # d-vector
+            mu[k] = np.dot(x.T, theta)  # scalar
+        return expit(mu)

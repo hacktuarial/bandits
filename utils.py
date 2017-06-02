@@ -8,8 +8,8 @@ def regret(bandit, path):
     """ calculate regret = reward under optimal policy
     minus expected value of the actual policy taken
     only for bandits whose parameters == expected value of reward"""
-    optimal = max(bandit.get_parameters())
-    expected = bandit.get_parameters()[path]
+    optimal = max(bandit.get_mean())
+    expected = bandit.get_mean()[path]
     return np.mean(optimal - expected)
 
 
