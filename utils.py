@@ -10,7 +10,7 @@ def regret(bandit, path):
     only for bandits whose parameters == expected value of reward"""
     optimal = max(bandit.get_mean())
     expected = bandit.get_mean()[path]
-    return np.mean(optimal - expected)
+    return optimal - np.mean(expected)
 
 
 def softmax(x):

@@ -5,6 +5,11 @@ import numpy as np
 from utils import softmax
 
 
+def quadratic_form(A, x):
+    " x'Ax "
+    return np.dot(np.dot(x.T, A), x)
+
+
 def random_policy(bandit, n_plays):
     "play every arm once, then play completely at random"
     assert n_plays >= bandit.K
@@ -113,35 +118,36 @@ def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_pen
     """
     K = bandit.get_K()
     # keep track of decisions made and rewards
-    path = [np.nan] * n_plays
+    path = np.empty(n_plays, dtype=int)
     rewards = [np.nan] * n_plays
     # parameters for the policy
-    d = len(bandit.get_features(0))
-    A = [np.eye(d) * l2_penalty] * K
-    b = [np.zeros(d)] * K
-    theta = [np.nan] * K
-    p = [np.nan] * K
+    d = len(bandit.get_features())
+    theta = np.zeros((K, d))
+    A = np.zeros(d * d * K).reshape((K, d, d))
+    for k in range(K):
+        for i in range(d):
+            A[k, i, i] = 1
+    b = np.zeros((K, d))
+    p = np.zeros(K)
 
     for t in range(n_plays):
-        features = bandit.get_features(range(K))
-        # play every arm once
+        x = bandit.get_features()  # iid context
         if t < K and play_all_first:
             k = t
         else:
             for k in range(K):
-                x = features[k, :]
-                theta[k] = np.linalg.solve(A[k], b[k])
-                p[k] = np.dot(theta[k].T, x) + \
-                        alpha * np.sqrt(np.dot(np.dot(x.T,
-                                                      np.linalg.inv(A[k])),
-                                               x))
+                theta[k, :] = np.linalg.solve(A[k, :, :], b[k, :])
+                exploit = np.dot(theta[k, :].T, x)
+                A_inv = np.linalg.inv(A[k, :, :])
+                explore = np.sqrt(quadratic_form(A_inv, x))
+                p[k] = exploit + alpha * explore 
             k = np.argmax(p)
         reward = bandit.pull_arm(k)
         # update our parameters
-        A[k] += np.dot(features[k, :], features[k, :].T)
-        b[k] += reward * features[k, :]
+        A[k, :, :] += np.dot(x, x.T)
+        b[k, :] += reward * x
         # book keeping
         path[t] = k
         rewards[t] = reward
 
-    return (path, rewards)
+    return (path, rewards, theta)

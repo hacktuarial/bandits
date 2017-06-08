@@ -3,6 +3,7 @@ Multi-armed bandits
 """
 import numpy as np
 from scipy.special import expit
+from scipy import stats
 
 
 class Bandit(object):
@@ -72,14 +73,11 @@ class BinaryBandit(Bandit):
 
 
 class DisjointLinearBandit(Bandit):
-    " K-armed contextual bandit with binary payoffs "
+    " K-armed contextual bandit with 0/1 payoffs "
     def initialize(self, **kwargs):
         d = kwargs.get("d")  # dimension of feature vectors
         loc = kwargs.get("loc", 0)
         scale = kwargs.get("scale", 1)
-        # each arm has its own feature vector of length d
-        self.features = np.random.normal(size=self.K * d).\
-                reshape((self.K, d))
         # parameters are N(loc, scale) using specified parameters
         # default: standard normal
         theta = np.random.normal(loc=loc,
@@ -87,24 +85,28 @@ class DisjointLinearBandit(Bandit):
                                  size=self.K * d).\
                reshape((self.K, d))
         self.parameters = theta
+        # features are assumed to be standard normal
+        # with a random covariance matrix
+        # first one is an intercept
+        self.features_mu = np.zeros(d - 1)
+        self.features_Sigma = np.eye(d - 1)
+        # more complex:
+        # self.features_Sigma = stats.Wishart.rvs(df = d + 1,
+        #                                         scale=1)
 
 
     def pull_arm(self, k):
-        x = self.get_features(k)  # d-vector
+        x = self.get_features()  # d-vector
         theta = self.parameters[k, :]  # d-vector
         mu = expit(np.dot(x.T, theta))  # scalar
-        return np.random.binomial(n=1,
-                                  p=mu,
-                                  size=1)[0]
+        return np.random.binomial(n=1, p=mu, size=1)[0]
 
-    def get_features(self, k):
-        " get features for the specified arm "
-        return self.features[k, :]
+    def get_features(self):
+        x = np.random.multivariate_normal(self.features_mu,
+                                          self.features_Sigma,
+                                          size=1)
+        x = np.concatenate([np.ones(1), np.ravel(x)])
+        return x
 
     def get_mean(self):
-        mu = np.zeros(self.get_K())
-        for k, _ in enumerate(mu):
-            x = self.get_features(k)  # d-vector
-            theta = self.parameters[k, :]  # d-vector
-            mu[k] = np.dot(x.T, theta)  # scalar
-        return expit(mu)
+        return expit(self.parameters[:, 0])
