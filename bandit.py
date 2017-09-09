@@ -1,112 +1,159 @@
 """
 Multi-armed bandits
 """
+import abc
 import numpy as np
-from scipy.special import expit
-from scipy import stats
+# from scipy.special import expit
 
 
 class Bandit(object):
     " Generic bandit "
-    def __init__(self, K, **kwargs):
+    __metaclass__ = abc.ABCMeta
+
+    def __init__(self, **kwargs):
         " initialize "
         self.parameters = None
-        self.K = K
         self.initialize(**kwargs)
 
+    @abc.abstractmethod
     def initialize(self, **kwargs):
         " create parameters for each arm "
-        pass
+        raise NotImplementedError
 
+    @abc.abstractmethod
     def get_K(self):
         " return number of arms of this bandit "
-        return self.K
+        raise NotImplementedError
 
     def get_parameters(self):
         " return parameters of this bandit "
         return self.parameters
 
-    def pull_arm(self, k):
+    @abc.abstractmethod
+    def pull_arm(self, k, **kwargs):
         " play specified arm of this bandit "
-        pass
+        raise NotImplementedError
 
+    @abc.abstractmethod
     def get_mean(self):
         " translate bandit features into expected rewards "
-        pass
+        raise NotImplementedError
 
 
 class LinearBandit(Bandit):
     " K-armed bandit with Gaussian payoffs "
     def initialize(self, **kwargs):
-        loc = kwargs.get('loc', 0)
-        scale = kwargs.get('scale', 1)
-        noise = kwargs.get('sigma', 1)
-        self.noise = noise
-        self.parameters = np.random.normal(loc=loc,
-                                           scale=scale,
-                                           size=self.get_K())
+        self.noise = kwargs.get('noise')
+        self.parameters = kwargs.get('parameters')
 
     def pull_arm(self, k):
         return np.random.normal(loc=self.parameters[k],
                                 scale=self.noise,
                                 size=1)[0]
 
+    def get_K(self):
+        return len(self.get_parameters())
+
     def get_mean(self):
-        raise NotImplementedError
+        return self.get_parameters()
 
 
 class BinaryBandit(Bandit):
-    """ bernoulli bandit with K arms.
+    """
+    context-free bernoulli bandit with K arms.
     each arm pays 1 with some probability p
-    or 0 with probability 1-p """
+    or 0 with probability 1-p
+    """
     def initialize(self, **kwargs):
-        a = kwargs.get('a', 2)
-        b = kwargs.get('b', 2)
-        self.parameters = np.random.beta(a, b, size=self.K)
+        self.parameters = kwargs.get('parameters')
 
     def pull_arm(self, k):
         return np.random.binomial(n=1,
                                   p=self.parameters[k],
                                   size=1)[0]
+
     def get_mean(self):
         return self.get_parameters()
 
+    def get_K(self):
+        return len(self.get_parameters())
 
-class DisjointLinearBandit(Bandit):
-    " K-armed contextual bandit with 0/1 payoffs "
+
+class LinearDisjointContextualBandit(Bandit):
+    """
+    Reward is a dot product of a context-vector and
+    the selected arm's parameters.
+    Rows do not share any parameters.
+    These parameters are random normal with user supplied
+    location and scale. Default: standard normal
+    """
     def initialize(self, **kwargs):
-        d = kwargs.get("d")  # dimension of feature vectors
-        loc = kwargs.get("loc", 0)
-        scale = kwargs.get("scale", 1)
-        # parameters are N(loc, scale) using specified parameters
-        # default: standard normal
-        theta = np.random.normal(loc=loc,
-                                 scale=scale,
-                                 size=self.K * d).\
-               reshape((self.K, d))
-        self.parameters = theta
-        # features are assumed to be standard normal
-        # with a random covariance matrix
-        # first one is an intercept
-        self.features_mu = np.zeros(d - 1)
-        self.features_Sigma = np.eye(d - 1)
-        # more complex:
-        # self.features_Sigma = stats.Wishart.rvs(df = d + 1,
-        #                                         scale=1)
+        " parameters must be a K x d array "
+        self.parameters = kwargs.get('parameters')
+        self.noise = kwargs.get('noise')
 
+    def pull_arm(self, **kwargs):
+        """
+        :param: k. which arm to pull
+        :param: x. vector summarising context
+        """
+        k = kwargs.get('k')
+        context_vector = kwargs.get('x')
+        exp_rwd = np.dot(self.parameters[k, :].T, context_vector)
+        noise = np.random.normal(loc=0, scale=self.noise, size=1)[0]
+        reward = exp_rwd + noise
+        if reward > 0:
+            return 1
+        else:
+            return 0
 
-    def pull_arm(self, k):
-        x = self.get_features()  # d-vector
-        theta = self.parameters[k, :]  # d-vector
-        mu = expit(np.dot(x.T, theta))  # scalar
-        return np.random.binomial(n=1, p=mu, size=1)[0]
-
-    def get_features(self):
-        x = np.random.multivariate_normal(self.features_mu,
-                                          self.features_Sigma,
-                                          size=1)
-        x = np.concatenate([np.ones(1), np.ravel(x)])
-        return x
+    def get_K(self):
+        return self.get_parameters().shape[0]
 
     def get_mean(self):
-        return expit(self.parameters[:, 0])
+        " mean depends on the context vector "
+        raise NotImplementedError
+
+
+class LinearHybridContextualBandit(Bandit):
+    """
+    Reward is a dot product of a context-vector and
+    the selected arm's parameters.
+    Rows share some parameters.
+    These parameters are random normal with user supplied
+    location and scale. Default: standard normal
+    """
+    def initialize(self, **kwargs):
+        """
+        :param: common_parameters: vector of parameters shared by all arms
+        :param: arm_parameters. array of parameters, one row for each arm
+        """
+        self.common_parameters = kwargs.get('common_parameters')
+        self.arm_parameters = kwargs.get('arm_parameters')
+        self.noise = kwargs.get('noise')
+
+    def pull_arm(self, **kwargs):
+        """
+        :param: k. which arm to pull
+        :param: x. vector of user/arm features,
+            with parameters specific to arm k
+        :param: z. vector of user/arm features,
+            with parameters shared by all arms
+        """
+        which_arm = kwargs.get('k')
+        context_x = kwargs.get('x')
+        context_z = kwargs.get('z')
+        exp_rwd = np.dot(self.arm_parameters[which_arm, :].T, context_x)
+        exp_rwd += np.dot(self.common_parameters.T, context_z)
+        reward = exp_rwd + np.random.normal(loc=0, scale=self.noise, size=1)[0]
+        if reward > 0:
+            return 1
+        else:
+            return 0
+
+    def get_K(self):
+        return self.arm_parameters.shape[0]
+
+    def get_mean(self):
+        " mean depends on the context vector "
+        raise NotImplementedError
