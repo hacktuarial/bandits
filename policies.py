@@ -5,7 +5,7 @@ import numpy as np
 from utils import softmax
 
 
-def quadratic_form(A, x):
+def _quadratic_form(A, x):
     " x'Ax "
     return np.dot(np.dot(x.T, A), x)
 
@@ -112,8 +112,14 @@ def thompson_policy(bandit, n_plays):
     return (outcomes, path, rewards)
 
 
-def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_penalty=1.0):
-    """ source:
+def lin_ucb_disjoint_policy(bandit,
+                            bandit_context,
+                            n_plays,
+                            alpha,
+                            play_all_first=False,
+                            l2_penalty=1.0):
+    """
+    source:
     Algorithm 1 of https://arxiv.org/pdf/1003.0146.pdf
     """
     K = bandit.get_K()
@@ -122,11 +128,8 @@ def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_pen
     rewards = [np.nan] * n_plays
     # parameters for the policy
     d = len(bandit.get_features())
+    A = _initialize_A(K=K, d=d)
     theta = np.zeros((K, d))
-    A = np.zeros(d * d * K).reshape((K, d, d))
-    for k in range(K):
-        for i in range(d):
-            A[k, i, i] = 1
     b = np.zeros((K, d))
     p = np.zeros(K)
 
@@ -139,8 +142,8 @@ def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_pen
                 theta[k, :] = np.linalg.solve(A[k, :, :], b[k, :])
                 exploit = np.dot(theta[k, :].T, x)
                 A_inv = np.linalg.inv(A[k, :, :])
-                explore = np.sqrt(quadratic_form(A_inv, x))
-                p[k] = exploit + alpha * explore 
+                explore = np.sqrt(_quadratic_form(A_inv, x))
+                p[k] = exploit + alpha * explore
             k = np.argmax(p)
         reward = bandit.pull_arm(k)
         # update our parameters
@@ -151,3 +154,78 @@ def lin_ucb_disjoint_policy(bandit, n_plays, alpha, play_all_first=False, l2_pen
         rewards[t] = reward
 
     return (path, rewards, theta)
+
+
+def _initialize_A(K, d):
+    """
+    """
+    A = np.zeros(d * d * K).reshape((K, d, d))
+    for k in xrange(K):
+        for i in xrange(d):
+            A[k, i, i] = 1
+    return A
+
+
+def lin_ucb_hybrid_policy(bandit,
+                          bandit_context,
+                          n_plays,
+                          alpha,
+                          play_all_first=False):
+    """
+    source:
+    Algorithm 2 of https://arxiv.org/pdf/1003.0146.pdf
+    """
+    dim_shared = bandit_context.dim_shared
+    dim_each = bandit_context.dim_each
+    # A_0, b_0 are for the features shared by all arms
+    A_0 = np.eye(bandit.get_K())
+    b_0 = np.zeros(bandit.get_K())
+    # arm-specific design matrices and rewards
+    A = _initialize_A(K=bandit.get_K(),
+                      d=dim_each)
+    B = np.zeros((bandit.get_K(), dim_each, dim_shared))
+    b = np.zeros((bandit.get_K(), dim_each))
+    s = np.zeros((n_plays, bandit.get_K()))
+    p = np.zeros((n_plays, bandit.get_K()))
+    theta = np.zeros((bandit.get_K(), dim_each))
+    # keep track of decisions made and rewards
+    path = np.empty(n_plays, dtype=int)
+    rewards = [np.nan] * n_plays
+    for t in xrange(n_plays):
+        # generate features
+        if t < bandit.get_K() and play_all_first:
+            k = t
+        else:
+            # observe features of all arms
+            x = bandit.get_individual_features(k)
+            z = bandit.get_shared_features(k)
+            beta_hat = np.linalg.solve(A_0, b_0)
+            for k in xrange(bandit.get_K()):
+                theta[k, :] = np.linalg.solve(A[k, :, :],
+                                              b[k, :] - np.dot(B[k, :, :],
+                                                               beta_hat))
+                A_0_inv = np.linalg.inv(A_0)
+                A_k_inv = np.linag.inv(A[k, :, :])
+                s[t, k] = _quadratic_form(A_0_inv, z)
+                s[t, k] -= 2 * np.dot(np.dot(z.T, A_0_inv),
+                                      np.dot(B[k, :, :].T, A_k_inv, x))
+                s[t, k] += _quadratic_form(A_k_inv, x)
+                something_ugly = np.dot(np.dot(A_k_inv, B[k, :, :]),
+                                        np.dot(A_0_inv, B[k, :, :].T),
+                                        A_k_inv)
+                s[t, k] += _quadratic_form(something_ugly, x)
+                p[t, k] = np.dot(z.T, beta_hat) + np.dot(x.T, theta[k, :])
+                p[t, k] += alpha * np.sqrt(s[t, k])
+            k = np.argmax(p)
+        reward = bandit.pull_arm(k)
+        A_k_inv = np.linalg.inv(A[k, :, :])
+        A_0 += _quadratic_form(A_k_inv, B[k, :, :])
+        b_0 += np.dot(np.dot(B[k, :, :].T, A_k_inv), b[k, :])
+        A[k, :, :] += np.dot(x, x.T)
+        # recompute inverse
+        A_k_inv = np.linalg.inv(A[k, :, :])
+        B[k, :, :] += np.dot(x, z.T)
+        b[k, :] += reward * x
+        A_0 += np.dot(z, z.T) - _quadratic_form(B[k, :, :], A_k_inv)
+        b_0 += reward * z - np.dot(np.dot(B[k, :, :].T, A_k_inv), b[k, :])
+    return (path, rewards, beta_hat, theta)
